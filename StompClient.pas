@@ -36,6 +36,7 @@ uses
   IdExceptionCore,
   IdHeaderList,
   IdIOHandler, IdIOHandlerSocket, IdIOHandlerStack, IdSSL, IdSSLOpenSSL, // SSL
+  IdStackConsts,
   System.SyncObjs,
 {$ELSE}
   synsock,
@@ -176,6 +177,7 @@ type
     function GetSession: string;
 
     function SetConnectionTimeout(const Value: UInt32): IStompClient;
+    function SetSendTimeout(const AMilliSeconds: Integer): IStompClient;
     function SetOnBeforeSendFrame(const Value: TSenderFrameEvent): IStompClient;
     function SetOnAfterSendFrame(const Value: TSenderFrameEvent): IStompClient;
     function SetOnHeartBeatError(const Value: TNotifyEvent): IStompClient;
@@ -341,6 +343,7 @@ type
 
     FAcceptVersion: TStompAcceptProtocol;
     FConnectionTimeout: UInt32;
+    FSendTimeout: Integer;
     FOutgoingHeartBeats: Int64;
     FIncomingHeartBeats: Int64;
     FLock: TObject;
@@ -423,6 +426,7 @@ type
       write SetReceiptTimeout;
     property Transactions: TStringList read FTransactions;
     function SetConnectionTimeout(const Value: UInt32): IStompClient;
+    function SetSendTimeout(const AMilliSeconds: Integer): IStompClient;
     property ConnectionTimeout: UInt32 read FConnectionTimeout
       write FConnectionTimeout;
     // * Manage Events
@@ -1002,6 +1006,14 @@ begin
     FTCP.ConnectTimeout := FConnectionTimeout;
     FTCP.Connect(FHost, FPort);
     FTCP.IOHandler.MaxLineLength := MaxInt;
+    // Optional socket send timeout (SO_SNDTIMEO): bounds a blocking write so a
+    // peer that stops reading (TCP back-pressure) cannot block the sender
+    // indefinitely. 0 disables it (default). Windows only: on POSIX SO_SNDTIMEO
+    // takes a timeval, so the integer option overload does not apply there.
+{$IFDEF MSWINDOWS}
+    if FSendTimeout > 0 then
+      FTCP.Socket.Binding.SetSockOpt(Id_SOL_SOCKET, Id_SO_SNDTIMEO, FSendTimeout);
+{$ENDIF}
 {$ENDIF}
 
     Frame := TStompFrame.Create;
@@ -1092,6 +1104,7 @@ begin
   FTimeout := 200;
   FReceiptTimeout := FTimeout;
   FConnectionTimeout := 1000 * 10; // 10secs
+  FSendTimeout := 0; // 0 = no socket send timeout (default: unchanged behaviour)
   FIncomingHeartBeats := 10000; // 10secs
   FOutgoingHeartBeats := 0; // disabled
 
@@ -1673,6 +1686,12 @@ end;
 function TStompClient.SetConnectionTimeout(const Value: UInt32): IStompClient;
 begin
   FConnectionTimeout := Value;
+  Result := Self;
+end;
+
+function TStompClient.SetSendTimeout(const AMilliSeconds: Integer): IStompClient;
+begin
+  FSendTimeout := AMilliSeconds;
   Result := Self;
 end;
 
