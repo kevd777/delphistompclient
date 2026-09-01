@@ -1494,8 +1494,22 @@ function TStompClient.Receive(ATimeout: Integer): IStompFrame;
               FTCP.Socket.ReadStream(SStream, ContentLength, false)
             else
             begin
-              if FTCP.Socket.CheckForDataOnSource(ATimeOut) then
-                FTCP.Socket.ReadStream(SStream, -1, true);
+              // ST-1604: a frame without content-length cannot contain NUL in
+              // its body (STOMP 1.1 spec), so it ends at the frame-terminating
+              // NUL — read exactly that, like the text branch above. The
+              // previous CheckForDataOnSource(ATimeOut) + ReadStream(-1,
+              // AReadUntilDisconnect=True) pair waited on the SOCKET while the
+              // terminator of a fully-delivered frame (every RECEIPT/CONNECTED/
+              // ERROR without content-length) already sat in the input buffer,
+              // so such frames only returned after burning the ENTIRE ATimeOut
+              // — and an until-disconnect read can never legitimately complete
+              // on a live connection anyway. The re-appended #0 keeps the
+              // buffer's canonical ending for CreateFrameWithBuffer (its
+              // no-content-length branch strips the final byte).
+              lLine := FTCP.Socket.ReadLn(#0 + LF, IndyTextEncoding_8Bit);
+              SStream.WriteString(lLine);
+              SStream.WriteString(#0);
+              ReadNull := true;
             end;
             AsBytes := true;
           end;
